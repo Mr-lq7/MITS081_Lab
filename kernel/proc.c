@@ -119,7 +119,6 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
-
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -141,6 +140,7 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->mask = 0; //most important plus
   return p;
 }
 
@@ -276,6 +276,7 @@ fork(void)
   struct proc *np;
   struct proc *p = myproc();
 
+
   // Allocate process.
   if((np = allocproc()) == 0){
     return -1;
@@ -288,6 +289,7 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -313,6 +315,7 @@ fork(void)
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+  np->mask = p->mask; //plus
   release(&np->lock);
 
   return pid;
@@ -653,4 +656,27 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int getNumOfProcesses(void) {
+  //获取不是UNUSED的进程
+  int numOfProcesses = 0;
+  
+  struct proc *p;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    if(p->state == UNUSED) {
+      release(&p->lock);
+      continue;
+    }
+
+    else {
+      numOfProcesses = numOfProcesses + 1;
+      release(&p->lock);
+    }
+
+  }
+  return numOfProcesses;
+
 }
