@@ -56,6 +56,9 @@ kvminit(void)
   kernel_pagetable = kvmmake();
 }
 
+
+
+
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
 void
@@ -388,7 +391,10 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     srcva = va0 + PGSIZE;
   }
   return 0;
+
 }
+
+
 
 // Copy a null-terminated string from user to kernel.
 // Copy bytes to dst from virtual address srcva in a given page table,
@@ -431,4 +437,32 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+
+void traverse(pagetable_t pagetable, int level) {
+
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){ //PTE有效
+      uint64 pa = PTE2PA(pte);
+      if (level == 0) {
+        printf("..%d: pte %p pa %p\n", i, pte, pa);
+        traverse((pagetable_t)pa, level+1);
+      } else if (level == 1) {
+        printf(".. ..%d: pte %p pa %p\n", i, pte, pa);
+        traverse((pagetable_t)pa, level+1);
+      } else {
+        printf(".. .. ..%d: pte %p pa %p\n", i, pte, pa);
+      }        
+    }  
+  }
+}
+
+void vmprint(pagetable_t pagetable)
+{
+
+  printf("page table %p\n", pagetable);
+  traverse(pagetable, 0);
+
 }

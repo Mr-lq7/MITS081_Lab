@@ -20,6 +20,8 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+extern char etext[];  
+
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
 // memory model when using p->parent.
@@ -53,6 +55,7 @@ procinit(void)
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
       p->kstack = KSTACK((int) (p - proc));
+
   }
 }
 
@@ -127,6 +130,13 @@ found:
     return 0;
   }
 
+  if((p->usyscall = (struct usyscall *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  p->usyscall->pid = p->pid;
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -134,6 +144,10 @@ found:
     release(&p->lock);
     return 0;
   }
+
+
+
+
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -155,6 +169,13 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+
+  if (p->usyscall) {
+    kfree((void*)p->usyscall);
+  }
+  p->usyscall = 0;
+
+
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -196,6 +217,13 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  if(mappages(pagetable, USYSCALL, PGSIZE,
+              (uint64)(p->usyscall), PTE_R | PTE_U) < 0){
+    uvmunmap(pagetable, USYSCALL, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
   return pagetable;
 }
 
@@ -206,8 +234,12 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  // uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
 }
+
+
+
 
 // a user program that calls exec("/init")
 // od -t xC initcode
@@ -453,6 +485,7 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
@@ -653,4 +686,29 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+//0是正确返回, -1是错误返回
+int pgaccess(pagetable_t pagetable,uint64 start_va, int page_num, uint64 result_va)
+{
+  if (page_num > 64) {
+    return -1;
+  }
+  uint64 bitmask = 1;
+
+  for (int i = 0; i < page_num; i++) {
+
+    //最后一个参数填0/1?
+    pte_t *pte = walk(pagetable, start_va + i * PGSIZE, 1);
+    if (pte == 0) {
+      return -1;
+    }
+
+    if (*pte & PTE_A) {
+      bitmask &= (1 << i);
+      copyout(pagetable, result_va, (uint64*)bitmask, sizeof(uint64));
+      *pte = PA2PTE(pagetable) & (~PTE_A);
+    }
+  }
+  return 0;
 }
