@@ -135,6 +135,7 @@ found:
     release(&p->lock);
     return 0;
   }
+
   p->usyscall->pid = p->pid;
 
   // An empty user page table.
@@ -234,7 +235,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
-  // uvmunmap(pagetable, USYSCALL, 1, 0);
+  uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
 }
 
@@ -694,21 +695,20 @@ int pgaccess(pagetable_t pagetable,uint64 start_va, int page_num, uint64 result_
   if (page_num > 64) {
     return -1;
   }
-  uint64 bitmask = 1;
-
+  uint64 bitmask = 0;
   for (int i = 0; i < page_num; i++) {
 
-    //最后一个参数填0/1?
-    pte_t *pte = walk(pagetable, start_va + i * PGSIZE, 1);
+
+    //参数填0/1?
+    pte_t* pte = walk(pagetable, start_va + i*PGSIZE, 0);
     if (pte == 0) {
       return -1;
     }
-
     if (*pte & PTE_A) {
-      bitmask &= (1 << i);
-      copyout(pagetable, result_va, (uint64*)bitmask, sizeof(uint64));
-      *pte = PA2PTE(pagetable) & (~PTE_A);
+      bitmask |= 1 << i;
+      *pte = *pte & (~PTE_A);
     }
   }
+  copyout(pagetable, result_va, (char*)&bitmask, sizeof(uint64));
   return 0;
 }
