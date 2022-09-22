@@ -132,3 +132,18 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+
+
+// insert
+void backtrace(void)
+{
+  printf("backtrace:\n");
+  uint64 fp = r_fp();
+  uint64 base = PGROUNDUP(fp); //获得栈底地址
+  while (fp < base) {
+    printf("%p\n", *(uint64 *)(fp-8));
+    fp = *((uint64 *)(fp-16));
+  }
+
+}

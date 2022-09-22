@@ -43,7 +43,7 @@ usertrap(void)
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
-  w_stvec((uint64)kernelvec);
+  w_stvec((uint64)kernelvec); //已经切换成内核页表
 
   struct proc *p = myproc();
   
@@ -77,8 +77,21 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2) {
+
+    if (p->interval) {
+      
+      if (p->ticks == p->interval && p->run_handler == 0) {
+        p->ticks = 0;
+        p->run_handler = 1;
+        p->trapframe_cp = *(p->trapframe); //便于返回到用户空间时恢复
+        p->trapframe->epc = (uint64)p->handler; //保证返回到用户空间时执行的地址
+      }
+      p->ticks++;
+    }
     yield();
+  }
+
 
   usertrapret();
 }

@@ -60,6 +60,7 @@ sys_sleep(void)
 
   if(argint(0, &n) < 0)
     return -1;
+  backtrace();
   acquire(&tickslock);
   ticks0 = ticks;
   while(ticks - ticks0 < n){
@@ -95,3 +96,39 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
+//从用户态切到内核态
+uint64 sys_sigalarm(void)
+{
+  
+  int interval; //获取sigalarm函数的第一个参数
+  uint64 handler; //获取sigalarm函数的第二个参数
+  if (argint(0, &interval) < 0) {
+    return -1;
+  }
+  if (interval < 0) return -1;
+  if (interval == 0) return 0;
+
+  if (argaddr(1, &handler) < 0) {
+    return -1;
+  }
+  myproc()->handler = (void *)handler;
+  myproc()->ticks = 0;
+  myproc()->run_handler = 0;
+  myproc()->interval = interval;
+  return 0;
+}
+
+
+//从内核态中返回
+uint64 sys_sigreturn(void)
+{
+  //恢复寄存器
+  myproc()->run_handler = 0;
+  myproc()->ticks = 0;
+  *(myproc()->trapframe) = myproc()->trapframe_cp;
+
+  return 0;
+}
+
