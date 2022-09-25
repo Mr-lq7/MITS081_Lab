@@ -64,6 +64,9 @@ void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
 
+void            kincre(void *);
+void            kdecre(void *);
+
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);
@@ -170,6 +173,10 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+
+int             is_cow(pagetable_t, uint64);
+uint64          cow_alloc(pagetable_t, uint64);
+
 
 // plic.c
 void            plicinit(void);
