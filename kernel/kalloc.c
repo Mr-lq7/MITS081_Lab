@@ -18,18 +18,23 @@ struct run {
   struct run *next;
 };
 
-struct {
+typedef struct {
   struct spinlock lock;
   struct run *freelist;
 } kmem;
 
+kmem kmems[NCPU]; //新加
+
 void
-kinit()
+kinit() //改动
 {
-  initlock(&kmem.lock, "kmem");
+  for(int i=0;i<NCPU;i++)
+  {
+    initlock(&(kmems[i].lock), "kmem");  
+  }
+  
   freerange(end, (void*)PHYSTOP);
 }
-
 void
 freerange(void *pa_start, void *pa_end)
 {
@@ -44,9 +49,11 @@ freerange(void *pa_start, void *pa_end)
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
 void
-kfree(void *pa)
+kfree(void *pa) //改动
 {
   struct run *r;
+
+  
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
@@ -56,25 +63,63 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  int cpu_id;
+  push_off();
+  cpu_id=cpuid();
+  
+  acquire(&(kmems[cpu_id].lock));
+  r->next = kmems[cpu_id].freelist;
+  kmems[cpu_id].freelist = r;
+  release(&(kmems[cpu_id].lock));
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
 void *
-kalloc(void)
+kalloc(void) //改动
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
+  int cpu_id;
+  push_off();
+  cpu_id=cpuid();
+  
+  
+  acquire(&(kmems[cpu_id].lock));
+  r = kmems[cpu_id].freelist;
   if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+  {
+    //当前cpu的freelist不为空
+    kmems[cpu_id].freelist = r->next;
+  }
+  else
+  {
+    //当前cpu的freelist为空
+    //遍历其他所有cpu的freelist
+    //int steal_num=32;       
+    for(int steal_id=0;steal_id<NCPU;steal_id++)
+    {
+      if(steal_id==cpu_id)
+      {
+        continue;
+      }     
+      acquire(&(kmems[steal_id].lock));
+      r=kmems[steal_id].freelist;                 
+      if(r)
+      {
+        //找到一个其他cpu的freelist不为空，从其表头拿1个节点
+        
+        kmems[steal_id].freelist = r->next; 
+        release(&(kmems[steal_id].lock));
+        break;
+      }
+      release(&(kmems[steal_id].lock));
+    }         
+  }
+  release(&(kmems[cpu_id].lock));
+  pop_off(); 
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
