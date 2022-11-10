@@ -401,6 +401,40 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+////////////////////////////////////////
+  //新加
+  struct buf *bp1st;
+  struct buf *bp2nd;
+  uint *a1;
+  bn -= NINDIRECT;
+  if(bn < NDBINDIRECT){
+    // Load indirect block, allocating if necessary.
+    if((addr = ip->addrs[DDIRECT_PTR]) == 0)
+      ip->addrs[DDIRECT_PTR] = addr = balloc(ip->dev);
+
+    bp1st = bread(ip->dev, addr);
+    a = (uint*)bp1st->data;
+    uint block1st = bn / NINDIRECT; //定位到在第一级中的索引表
+    if((addr = a[block1st]) == 0){
+      a[block1st] = addr = balloc(ip->dev);
+      log_write(bp1st);
+    }
+    brelse(bp1st);
+
+    bp2nd = bread(ip->dev, addr);//读装满指针的二阶block
+    a1 = (uint*)bp2nd->data;
+    uint block2nd = bn % NINDIRECT;//访问二阶block的哪个指针
+    if((addr = a1[block2nd]) == 0)
+    {
+      a1[block2nd] = addr = balloc(ip->dev);
+      log_write(bp2nd);
+    }
+    
+    brelse(bp2nd);
+
+    return addr;
+  }
+
   panic("bmap: out of range");
 }
 
@@ -431,6 +465,36 @@ itrunc(struct inode *ip)
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
   }
+
+  struct buf *bp1, *bp2;
+  uint *a1;
+  //释放所有二阶指针，参照原来的写法
+  if(ip->addrs[DDIRECT_PTR])
+  {
+    bp1 = bread(ip->dev, ip->addrs[DDIRECT_PTR]); //访问一阶指针块
+    a=(uint*)bp1->data;
+    for(j=0;j<NINDIRECT;j++)
+    {
+      if(a[j])
+      {
+        //如果发现了二级指针块
+        bp2 = bread(ip->dev, a[j]); //访问它
+        a1=(uint*)bp2->data;
+        for(int k=0;k<NINDIRECT;k++)
+        {
+          if(a1[k])//如果这个位置有数据块则释放
+            bfree(ip->dev,a1[k]);
+        }
+        brelse(bp2);
+        bfree(ip->dev,a[j]);//释放这个二级指针块
+      }
+      //释放完了二阶指针块，
+    }
+    brelse(bp1); //释放一级指针块
+    bfree(ip->dev, ip->addrs[DDIRECT_PTR]);
+    ip->addrs[DDIRECT_PTR] = 0;
+  }
+
 
   ip->size = 0;
   iupdate(ip);

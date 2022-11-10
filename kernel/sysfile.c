@@ -297,6 +297,7 @@ sys_open(void)
 
   begin_op();
 
+
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
@@ -315,6 +316,39 @@ sys_open(void)
       return -1;
     }
   }
+
+
+
+  //对于O_NOFOLLOW标志位没有的不用进行追踪/////////
+  if ((omode & O_NOFOLLOW) == 0) {
+    struct inode* dp;
+    char npath[MAXPATH];
+    int i;
+    for (i = 0; i < 10 && ip->type == T_SYMLINK; i++) {
+      //从inode读取数据到npath中  
+      if (readi(ip, 0, (uint64)npath, 0, MAXPATH) == 0) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+
+      if ((dp = namei(npath)) == 0) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      iunlockput(ip);
+      ip = dp;
+      ilock(ip);
+    }
+    if (i == 10) {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+
+  /////////////////////
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
@@ -483,4 +517,38 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_symlink(void) {
+
+  char target[MAXPATH], path[MAXPATH];
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+
+  struct inode* ip, *dp;
+  if ((ip = namei(target)) != 0) {
+    if (ip->type == T_DIR) {
+      end_op();
+      return -1;
+    }
+  }
+  if ((dp=create(path, T_SYMLINK, 0, 0)) == 0) {
+    end_op();
+    return -1;
+  }
+
+  int n = strlen(target);
+  // ilock(dp); //??????
+  if (writei(dp, 0, (uint64)target, 0, n) != n) {
+    panic("symlink: writei");
+  }
+
+  
+  iunlockput(dp); //用完inode记得释放
+  end_op();
+  return 0;
+
 }
