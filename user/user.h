@@ -40,3 +40,8 @@ void free(void*);
 int atoi(const char*);
 int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
+
+
+void* mmap(void *addr, int, int, int, int, int);
+
+int munmap(void *, int);

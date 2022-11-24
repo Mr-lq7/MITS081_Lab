@@ -6,6 +6,8 @@
 #include "proc.h"
 #include "defs.h"
 
+#include "fcntl.h"
+
 struct spinlock tickslock;
 uint ticks;
 
@@ -67,10 +69,58 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
+  }
+
+    //mmap 发送缺页中断
+  else if(r_scause()==13 || r_scause()==15)//page fault
+  {
+    int i;
+    // mmap
+    // do something
+    uint64 va = r_stval();
+    //printf("va: %p\n", va);
+    if(va >= p->sz || va < p->trapframe->sp){
+        p->killed = 1;
+    }
+    for(i = 0; i < 16; i++){
+      if(p->vma[i].valid == 1 && (uint64)p->vma[i].addr <= va && va < (p->vma[i].addr + p->vma[i].len)){
+        //printf("i: %d\n", i);
+        //printf("va: %p\n", va);
+        //printf("begin: %p, end : %p\n", p->vma[i].addr, (p->vma[i].addr + p->vma[i].len));
+        // 分配物理内存，增加映射
+        char *mem;
+        if( (mem = kalloc()) == 0){
+          p->killed = 1;
+        }else{
+          memset(mem, 0, PGSIZE);
+
+          int flag = 0 | PTE_U;
+          if((p->vma[i].prot & PROT_READ) != 0){
+              flag |= PTE_R;
+          } 
+          if((p->vma[i].prot & PROT_WRITE) != 0){
+              flag |= PTE_W;
+          }
+
+          ilock(p->vma[i].f->ip);
+          readi(p->vma[i].f->ip, 0, (uint64)mem, va - p->vma[i].addr, PGSIZE);
+          iunlock(p->vma[i].f->ip);
+
+          va = PGROUNDDOWN(va);
+          if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, flag) != 0){
+              kfree((void*)mem);
+              p->killed = 1;
+          }
+          break;
+        }
+      }
+    }
+  }
+  else {
+
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
   }
 
   if(p->killed)

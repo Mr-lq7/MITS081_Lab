@@ -6,6 +6,8 @@
 #include "proc.h"
 #include "defs.h"
 
+#include "fcntl.h" //
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -133,6 +135,11 @@ found:
     freeproc(p);
     release(&p->lock);
     return 0;
+  }
+
+  //新加
+  for (int i = 0; i < 16; i++) {
+    p->vma[i].valid = 0;
   }
 
   // Set up new context to start executing at forkret,
@@ -281,6 +288,8 @@ fork(void)
     return -1;
   }
 
+
+
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
@@ -288,6 +297,23 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  // 将父进程的内存映射区域复制给子进程
+  for(int i = 0; i < 16; i++){
+    if(p->vma[i].valid == 1){
+      np->vma[i].valid = p->vma[i].valid;
+      np->vma[i].addr = p->vma[i].addr;
+      np->vma[i].len = p->vma[i].len;
+      np->vma[i].prot = p->vma[i].prot;
+      np->vma[i].flag = p->vma[i].flag;
+      np->vma[i].fd = p->vma[i].fd;
+      np->vma[i].offset = p->vma[i].offset;
+      np->vma[i].f = p->vma[i].f;
+      filedup(np->vma[i].f);
+    }
+
+  }
+
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -340,9 +366,11 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
-
+  // uint64 len;
   if(p == initproc)
     panic("init exiting");
+
+
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
@@ -350,6 +378,19 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+// 新增代码
+  // 查看所有内存映射区域并释放
+  for(int i = 0; i < 16; i++){
+    if(p->vma[i].valid == 1){
+        if((p->vma[i].flag & MAP_SHARED) != 0){
+            filewrite(p->vma[i].f, p->vma[i].addr, p->vma[i].len);
+        }
+        fileclose(p->vma[i].f);
+        p->vma[i].valid = 0;
+        uvmunmap(p->pagetable, p->vma[i].addr, p->vma[i].len/PGSIZE, 0);
     }
   }
 

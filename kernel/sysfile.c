@@ -484,3 +484,90 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{
+  int len, prot, flag, fd;
+  struct file* f = 0;
+  struct proc *p = myproc();
+  int i;
+  /* 参数校验 */
+  if( argint(1, &len) < 0 || argint(2, &prot) < 0 || argint(3, &flag) < 0 || argint(4, &fd) < 0)
+    return -1;
+
+  if(fd >= NOFILE){
+    return -1;
+  }
+
+  f = p->ofile[fd];
+  if(f->writable == 0 && (prot & PROT_WRITE) != 0 && (flag & MAP_PRIVATE) == 0){
+    return -1;
+  }
+  /* 参数校验通过，寻找一个未使用过的vm_area_struct */
+  filedup(f);
+  for(i = 0; i < 16; i++){
+    if(p->vma[i].valid == 0){
+        p->vma[i].valid = 1;
+        p->vma[i].addr = p->sz;
+        p->vma[i].len = len;
+        p->vma[i].prot = prot;
+        p->vma[i].flag = flag;
+        p->vma[i].fd = fd;
+        p->vma[i].offset = 0;
+        p->vma[i].f = f;
+        break;
+    }
+  }
+
+  if(i == 16)
+    return -1;
+  /* 增加进程大小，返回映射地址 */
+  p->sz += len;
+  return p->vma[i].addr;
+}
+
+uint64
+sys_munmap(void)
+{
+
+  struct proc *p = myproc();
+  uint64 addr;
+  int len;
+  int i;
+
+  if(argaddr(0, &addr) < 0 || argint(1, &len) < 0)
+    return -1;
+  //printf("[[[[[[[[[[[[[[[[munmap begin[[[[[[[[[[[[[[[[[[[\n");
+  //printf("va: %p\n", addr);
+  //printf("len: %d\n", len);
+  for(i = 0; i < 16; i++){
+    if(p->vma[i].valid == 1 && p->vma[i].addr <= addr && (p->vma[i].addr + p->vma[i].len) >= (addr + len)){
+
+        //printf("i: %d\n", i);
+        //printf("vma: va: %p\n", p->vma[i].addr);
+        //printf("vma: len: %d\n", p->vma[i].len);
+        if((p->vma[i].flag & MAP_SHARED) != 0){
+            filewrite(p->vma[i].f, addr, len);
+        }
+
+        if(addr == p->vma[i].addr){
+            p->vma[i].addr = addr + len;
+        }
+        p->vma[i].len -= len;
+
+        if(p->vma[i].len == 0){
+            //printf("qqqqqqqqqqqqqqqqqqqqqqqqqqqq\n");
+            fileclose(p->vma[i].f);
+            p->vma[i].valid = 0;
+        }
+        uvmunmap(p->pagetable, addr, len/PGSIZE, 0);
+        break;
+    }
+  }
+  //printf("]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]\n");
+
+  if(i==16)
+    return -1;
+  return 0;
+}
