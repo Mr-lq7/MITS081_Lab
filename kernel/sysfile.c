@@ -16,6 +16,7 @@
 #include "file.h"
 #include "fcntl.h"
 
+#define min(a,b) ((a) < (b) ? (a) : (b))
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -488,86 +489,96 @@ sys_pipe(void)
 uint64
 sys_mmap(void)
 {
-  int len, prot, flag, fd;
-  struct file* f = 0;
   struct proc *p = myproc();
-  int i;
-  /* 参数校验 */
-  if( argint(1, &len) < 0 || argint(2, &prot) < 0 || argint(3, &flag) < 0 || argint(4, &fd) < 0)
-    return -1;
-
-  if(fd >= NOFILE){
-    return -1;
-  }
-
-  f = p->ofile[fd];
-  if(f->writable == 0 && (prot & PROT_WRITE) != 0 && (flag & MAP_PRIVATE) == 0){
+  uint64 addr;
+  int len;
+  int prot;
+  int flags;
+  int offset;
+  struct file *f;
+  if(argaddr(0, &addr) < 0 || argfd(4, 0, &f) < 0){
     return -1;
   }
-  /* 参数校验通过，寻找一个未使用过的vm_area_struct */
-  filedup(f);
-  for(i = 0; i < 16; i++){
-    if(p->vma[i].valid == 0){
-        p->vma[i].valid = 1;
-        p->vma[i].addr = p->sz;
-        p->vma[i].len = len;
-        p->vma[i].prot = prot;
-        p->vma[i].flag = flag;
-        p->vma[i].fd = fd;
-        p->vma[i].offset = 0;
-        p->vma[i].f = f;
-        break;
+  if(argint(1, &len) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 || argint(5, &offset) < 0){
+    return -1;
+  }
+  //check the mmaptest.c to solve
+  if(!f->writable && (prot & PROT_WRITE) && flags == MAP_SHARED) return -1;
+  for(int i = 0; i < MAXVMA; i++){
+    if(p->vma_table[i].mapped == 0){
+      p->vma_table[i].mapped = 1;
+      //if addr = 0, vma_table[i].addr is the top of heap (i.e. bottom of trapframe)
+      p->vma_table[i].addr = addr + p->sz;
+      p->vma_table[i].len = PGROUNDUP(len);
+      p->vma_table[i].prot = prot;
+      p->vma_table[i].flags = flags;
+      p->vma_table[i].offset = offset;
+      p->vma_table[i].f = filedup(f);
+      p->sz += PGROUNDUP(len);
+      return p->vma_table[i].addr;
+    }
+  }
+  return -1;
+}
+
+uint64
+munmap(uint64 addr, int len){
+  struct proc *p = myproc();
+  struct vma *pvma;
+  int i = 0;
+  for(; i < MAXVMA; i++){
+    pvma = &p->vma_table[i];
+    if(pvma->mapped == 1 && addr >= pvma->addr && ((addr + len) < (pvma->addr + pvma->len))){
+      break;
+    }
+  }
+  // not found
+  if(i > MAXVMA){
+    return -1;
+  }
+  int end = addr + len;
+  int _addr = addr;
+  //readonly file can be MAP_SHARED, so need another condition f->writable
+  if((pvma->flags == MAP_SHARED) && pvma->f->writable){
+  //steal from filewritei()
+    while(addr < end){
+       int size = min(end-addr, PGSIZE);
+       begin_op();
+       ilock(pvma->f->ip);
+       if(writei(pvma->f->ip, 1, addr, addr - pvma->addr, size) != size){
+         return -1;
+       }
+       iunlock(pvma->f->ip);
+       end_op();
+       uvmunmap(p->pagetable, addr, 1, 1);
+       addr += PGSIZE;
     }
   }
 
-  if(i == 16)
-    return -1;
-  /* 增加进程大小，返回映射地址 */
-  p->sz += len;
-  return p->vma[i].addr;
+  if(_addr == pvma->addr){
+    //head
+    pvma->addr += len;
+    pvma->len -= len;
+  }else if(_addr + len == pvma->addr + pvma->len){
+    //tail
+    pvma->len -= len;
+  }
+
+  if(pvma->len == 0 && pvma->mapped == 1){
+    fileundup(pvma->f);
+    pvma->mapped = 0;
+  }
+  return 0;
 }
 
 uint64
 sys_munmap(void)
 {
-
-  struct proc *p = myproc();
   uint64 addr;
   int len;
-  int i;
-
-  if(argaddr(0, &addr) < 0 || argint(1, &len) < 0)
+  if(argaddr(0, &addr) < 0 || argint(1, &len) < 0){
     return -1;
-  //printf("[[[[[[[[[[[[[[[[munmap begin[[[[[[[[[[[[[[[[[[[\n");
-  //printf("va: %p\n", addr);
-  //printf("len: %d\n", len);
-  for(i = 0; i < 16; i++){
-    if(p->vma[i].valid == 1 && p->vma[i].addr <= addr && (p->vma[i].addr + p->vma[i].len) >= (addr + len)){
-
-        //printf("i: %d\n", i);
-        //printf("vma: va: %p\n", p->vma[i].addr);
-        //printf("vma: len: %d\n", p->vma[i].len);
-        if((p->vma[i].flag & MAP_SHARED) != 0){
-            filewrite(p->vma[i].f, addr, len);
-        }
-
-        if(addr == p->vma[i].addr){
-            p->vma[i].addr = addr + len;
-        }
-        p->vma[i].len -= len;
-
-        if(p->vma[i].len == 0){
-            //printf("qqqqqqqqqqqqqqqqqqqqqqqqqqqq\n");
-            fileclose(p->vma[i].f);
-            p->vma[i].valid = 0;
-        }
-        uvmunmap(p->pagetable, addr, len/PGSIZE, 0);
-        break;
-    }
   }
-  //printf("]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]\n");
-
-  if(i==16)
-    return -1;
+  return munmap(addr, len);
   return 0;
 }

@@ -9,8 +9,6 @@ struct sleeplock;
 struct stat;
 struct superblock;
 
-// struct vm_area_struct;
-
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -31,6 +29,7 @@ int             exec(char*, char**);
 struct file*    filealloc(void);
 void            fileclose(struct file*);
 struct file*    filedup(struct file*);
+struct file*    fileundup(struct file*);
 void            fileinit(void);
 int             fileread(struct file*, uint64, int n);
 int             filestat(struct file*, uint64 addr);
@@ -140,6 +139,9 @@ int             argaddr(int, uint64 *);
 int             fetchstr(uint64, char*, int);
 int             fetchaddr(uint64, uint64*);
 void            syscall();
+
+// sysfile.c
+uint64          munmap(uint64, int);
 
 // trap.c
 extern uint     ticks;

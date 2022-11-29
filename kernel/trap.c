@@ -5,8 +5,9 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
-#include "fcntl.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -67,60 +68,48 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
-    // ok
-  }
-
-    //mmap 发送缺页中断
-  else if(r_scause()==13 || r_scause()==15)//page fault
-  {
-    int i;
-    // mmap
-    // do something
+  } else if(r_scause() == 13 || r_scause() == 15){
     uint64 va = r_stval();
-    //printf("va: %p\n", va);
-    if(va >= p->sz || va < p->trapframe->sp){
-        p->killed = 1;
-    }
-    for(i = 0; i < 16; i++){
-      if(p->vma[i].valid == 1 && (uint64)p->vma[i].addr <= va && va < (p->vma[i].addr + p->vma[i].len)){
-        //printf("i: %d\n", i);
-        //printf("va: %p\n", va);
-        //printf("begin: %p, end : %p\n", p->vma[i].addr, (p->vma[i].addr + p->vma[i].len));
-        // 分配物理内存，增加映射
-        char *mem;
-        if( (mem = kalloc()) == 0){
-          p->killed = 1;
-        }else{
-          memset(mem, 0, PGSIZE);
-
-          int flag = 0 | PTE_U;
-          if((p->vma[i].prot & PROT_READ) != 0){
-              flag |= PTE_R;
-          } 
-          if((p->vma[i].prot & PROT_WRITE) != 0){
-              flag |= PTE_W;
-          }
-
-          ilock(p->vma[i].f->ip);
-          readi(p->vma[i].f->ip, 0, (uint64)mem, va - p->vma[i].addr, PGSIZE);
-          iunlock(p->vma[i].f->ip);
-
-          va = PGROUNDDOWN(va);
-          if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, flag) != 0){
-              kfree((void*)mem);
-              p->killed = 1;
-          }
-          break;
-        }
+    struct vma *pvma;
+    int i = 0;
+    //p->sz point to the top of heap(i.e. bottom of trapframe)
+    //p->trapframe->sp point to the top of stack
+    if((va >= p->sz) || (va < PGROUNDDOWN(p->trapframe->sp))){
+      p->killed = 1;
+    } else{
+      va = PGROUNDDOWN(va);
+      for(; i < MAXVMA; i++){
+	pvma = &p->vma_table[i];
+        if(pvma->mapped && (va >= pvma->addr) && (va < (pvma->addr + pvma->len))){
+          char *mem;
+	  mem = kalloc();
+	  if(mem == 0){
+	    p->killed = 1;
+	    break;
+	  }
+	  memset(mem, 0, PGSIZE);
+	  //PTE_R (1L << 1), so prot also needs to move left one bit
+	  if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, (pvma->prot << 1) | PTE_U) != 0){
+	    kfree(mem);
+	    p->killed = 1;
+	    break;
+	  }
+	  break;
+	}
       }
     }
-  }
-  else {
 
-      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-      p->killed = 1;
+    if(p->killed != 1 && i <= MAXVMA){
+      ilock(pvma->f->ip);
+      readi(pvma->f->ip, 1, va, va - pvma->addr, PGSIZE);
+      iunlock(pvma->f->ip);
+    }
+  } else if((which_dev = devintr()) != 0){
+    // ok
+  } else {
+    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+    p->killed = 1;
   }
 
   if(p->killed)
