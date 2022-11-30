@@ -5,6 +5,9 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+
+// 一定要加上
+#include "fcntl.h"
 #include "sleeplock.h"
 #include "fs.h"
 #include "file.h"
@@ -79,23 +82,23 @@ usertrap(void)
     } else{
       va = PGROUNDDOWN(va);
       for(; i < MAXVMA; i++){
-	pvma = &p->vma_table[i];
+	      pvma = &p->vma_table[i];
         if(pvma->mapped && (va >= pvma->addr) && (va < (pvma->addr + pvma->len))){
           char *mem;
-	  mem = kalloc();
-	  if(mem == 0){
-	    p->killed = 1;
-	    break;
-	  }
-	  memset(mem, 0, PGSIZE);
-	  //PTE_R (1L << 1), so prot also needs to move left one bit
-	  if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, (pvma->prot << 1) | PTE_U) != 0){
-	    kfree(mem);
-	    p->killed = 1;
-	    break;
-	  }
-	  break;
-	}
+	        mem = kalloc();
+	        if(mem == 0){
+	          p->killed = 1;
+	          break;
+	        }
+	        memset(mem, 0, PGSIZE);
+          //PTE_R (1L << 1), so prot also needs to move left one bit
+          if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, (pvma->prot << 1) | PTE_U) != 0){
+            kfree(mem);
+            p->killed = 1;
+            break;
+          }
+          break;
+	      }
       }
     }
 

@@ -135,6 +135,10 @@ found:
     return 0;
   }
 
+
+  for (int i = 0; i < MAXVMA; i++) {
+    p->vma_table[i].mapped = 0;
+  }
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
