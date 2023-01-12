@@ -326,6 +326,7 @@ sys_open(void)
     int i;
     for (i = 0; i < 10 && ip->type == T_SYMLINK; i++) {
       //从inode读取数据到npath中  
+      ilock(ip); //plus
       if (readi(ip, 0, (uint64)npath, 0, MAXPATH) == 0) {
         iunlockput(ip);
         end_op();
@@ -339,7 +340,7 @@ sys_open(void)
       }
       iunlockput(ip);
       ip = dp;
-      ilock(ip);
+      // ilock(ip);
     }
     if (i == 10) {
       iunlockput(ip);
